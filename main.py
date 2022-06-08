@@ -1,3 +1,4 @@
+import tensorflow_hub as hub
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import os
@@ -9,10 +10,15 @@ import pandas as pd
 
 #https://medium.com/@ashraf.dasa/bean-disease-classification-using-tensorflow-convolutional-neural-network-cnn-2079dffe87ce
 
+
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 prjectName = 'beans'
 
+def resize_and_rescale(image, label):
+    image = tf.image.resize(image, [tam, tam])
+    return image, label
 
 def retrive_data():
     test_ds, info = tfds.load(prjectName, split='test', as_supervised=True, with_info=True, shuffle_files=True)
@@ -46,8 +52,8 @@ def wrangle_data_GenPlus(dataset, split, batch_size=32):
         wrangled = wrangled.cache()
         wrangled = wrangled.batch(batch_size)  # Combines consecutive elements of this dataset into batches.
         wrangled = wrangled.prefetch(tf.data.AUTOTUNE)
-    return wrangled
 
+    return wrangled
 
 def compileModel(model):
     model.compile(optimizer=tf.keras.optimizers.Adam(),
@@ -90,6 +96,7 @@ image_height = 500
 image_width = 500
 num_channels = 3  # RGB
 num_classes = 3  # healthy, angular leaf spot disease, bean rust disease
+tam = 224
 
 # Pipeline hyperparameters:
 batch_size = 32
@@ -110,6 +117,15 @@ def model2():
     ])
     return compileModel(model)
 
+
+def model3():
+    neural_net = tf.keras.Sequential([
+        mobile_net_layers,
+        tf.keras.layers.Dropout(0.3),
+        tf.keras.layers.Dense(3, activation='softmax')
+    ])
+    return compileModel(neural_net)
+
 def plot_History(history):
     pd.DataFrame(history.history).plot(figsize=(8, 5))
     plt.grid(True)
@@ -118,19 +134,31 @@ def plot_History(history):
 
 
 if __name__ == "__main__":
+
     # prepare the data
+
+    mobilenet_v2 = "https://tfhub.dev/google/imagenet/resnet_v2_101/classification/5"
+    mobile_net_layers = hub.KerasLayer(mobilenet_v2, input_shape=(tam, tam, 3))
+    mobile_net_layers.trainable = False
+
     test_ds, info = retrive_data()
     train_ds, valid_ds = get_training_data()
     batch_size = 64
+    train_ds = train_ds.map(resize_and_rescale, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    valid_ds = valid_ds.map(resize_and_rescale, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    test_ds = test_ds.map(resize_and_rescale, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     train_data = wrangle_data_GenPlus(train_ds, 'train', batch_size=batch_size)
     valid_data = wrangle_data_GenPlus(valid_ds, 'valid', batch_size=batch_size)
     test_data = wrangle_data_GenPlus(test_ds, 'test', batch_size=batch_size)
 
+
+    callback = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=6)
+
     # advancedCNN
-    model = myFullCNN()
+    model = model3()
 
     # fit the model
-    history = model.fit(train_data, validation_data=valid_data, epochs=50)
+    history = model.fit(train_data, validation_data=valid_data, epochs=50, callbacks=[callback])
 
     plot_History(history)
     print(model.evaluate(test_data))
